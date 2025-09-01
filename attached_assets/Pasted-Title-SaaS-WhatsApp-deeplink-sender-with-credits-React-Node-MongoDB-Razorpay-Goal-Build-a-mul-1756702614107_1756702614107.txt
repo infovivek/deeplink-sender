@@ -1,0 +1,103 @@
+Title: SaaS WhatsApp deeplink sender with credits (React, Node, MongoDB, Razorpay)
+
+Goal
+Build a multi-tenant app where users sign in, load contacts, buy credits, and send messages via WhatsApp “Click to Chat” deeplinks (api.whatsapp.com).
+No WhatsApp Business API. No UI automation of WhatsApp Web.
+
+Stack
+	•	Frontend: React + Vite, Tailwind, React Router
+	•	Backend: Node.js (Express, TypeScript)
+	•	DB: MongoDB Atlas (Mongoose)
+	•	Auth: Email/password + JWT (access/refresh)
+	•	Queue: BullMQ (Redis) for batching and throttling
+	•	Payments: Razorpay credits wallet
+	•	Deploy: Replit + Dockerfile; .env for secrets
+
+Product rules
+	•	Max 5 tabs opened per click action.
+	•	No daily credit cap; credits only.
+	•	Instances belong to users; no per-instance sender branding.
+	•	CSV headers: choose sane defaults if none provided: name, phone, city, custom1, custom2.
+
+Core features
+	•	Auth + multi-tenant Instances
+	•	Credits wallet (buy via Razorpay, auto-credit on webhook)
+	•	Contacts import (CSV) with E.164 validation
+	•	Campaigns with merge fields: {{name}}, {{city}}, {{custom1}}
+	•	Queue messages; for each recipient generate deeplink:
+https://api.whatsapp.com/send?phone=&text=<urlencoded_message>
+	•	“Open up to 5 tabs” button; record opened_link events
+	•	Dashboard: totals, usage, credits, failures (last 7 days)
+	•	Delivery Report with filters + CSV export
+	•	Message Queue view (pending, throttled, done)
+	•	Transactions history
+	•	Profile page (name, phone, password)
+	•	API Docs page (simple Swagger or markdown)
+
+APIs (JWT)
+	•	POST /auth/register, /auth/login, /auth/refresh
+	•	GET /me, PATCH /me
+	•	POST /instances, GET /instances, PATCH /instances/:id
+	•	GET /credits, POST /credits/purchase (creates Razorpay order), POST /credits/adjust (admin)
+	•	POST /billing/razorpay/order — body: {packId} → returns orderId, amount
+	•	POST /billing/razorpay/webhook — verify signature; on payment.captured add credits
+	•	POST /contacts/import (CSV), GET /contacts?instanceId=
+	•	POST /campaigns, GET /campaigns, PATCH /campaigns/:id
+	•	POST /messages/queue — {instanceId, campaignId?, items:[{to,text,mediaUrl?,vars?}]} (debit credits)
+	•	GET /messages?instanceId=&status=&q=
+	•	GET /deeplink?messageId= → returns one-time signed api.whatsapp.com URL + marks opened_link
+	•	GET /reports/delivery?filters… (with export)
+
+Data model
+	•	users { _id, email, pass_hash, name, phone, role, createdAt }
+	•	instances { _id, ownerId, name, isActive, webhookUrl?, createdAt }
+	•	credits { userId, balance, history:[{delta, reason, refId, at}] }
+	•	transactions { userId, provider:‘razorpay’, orderId, paymentId?, amount, creditsAdded, status, createdAt }
+	•	contacts { instanceId, name, phoneE164, fields, createdAt }
+	•	campaigns { instanceId, name, template, variables[], status, createdAt }
+	•	messages { instanceId, campaignId?, to, text, mediaUrl?, status:‘queued’|‘opened_link’|‘sent_by_user’|‘failed’|‘expired’, meta, createdAt }
+
+Frontend specifics
+	•	Left nav: Dashboard / Instances / Delivery Report / Inbox / Transactions / Message Queue / Broadcast / API Docs / Profile
+	•	Campaign builder with variable picker
+	•	Queue review table with “Open 5 tabs” and progress feedback
+	•	Charts with Recharts
+	•	Toasts for credit debit, imports, and link opens
+
+Credits logic
+	•	Debit 1 credit per queued recipient.
+	•	Refund if user cancels before opening the link.
+	•	Block queue when balance < required credits.
+
+Rate and safety
+	•	Throttle: max 5 deeplink opens per click; also 10 per minute per user.
+	•	E.164 validation; block empty text.
+	•	Basic keyword blocklist hook.
+
+Env (.env.example)
+JWT_SECRET=
+MONGO_URL=
+REDIS_URL=
+BASE_URL=
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+RAZORPAY_WEBHOOK_SECRET=
+DEEPLINK_SIGN_SECRET=
+
+Razorpay flow
+	•	Backend: create order with selected pack (e.g., ₹499 → 1,000 credits; map in config).
+	•	Frontend: load Razorpay Checkout with orderId.
+	•	Webhook verifies signature → mark payment captured → add credits → write transaction.
+
+Testing and seeds
+	•	Seed two users, one instance each, 25 contacts, one sample campaign.
+	•	Unit tests: wallet debit/refund, CSV import, deeplink signer, webhook signature verify.
+	•	Postman collection for all endpoints.
+
+Acceptance
+	•	User buys credits via Razorpay and sees updated balance.
+	•	User imports contacts, builds a campaign, queues messages, and opens up to 5 WhatsApp tabs per click.
+	•	Reports and exports work.
+	•	No Business API usage. No UI automation of WhatsApp Web.
+
+Build now. Scaffold the repo, commit in small steps, and keep README current.
